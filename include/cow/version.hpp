@@ -1,0 +1,13 @@
+#ifndef COW_VERSION_HPP
+#define COW_VERSION_HPP
+
+#define COW_MAJOR 0
+#define COW_MINOR 1
+#define COW_PATCH 0
+
+#define COW_SEMVER(MAJOR, MINOR, PATCH) \
+    (((MAJOR)*1000000) + ((MINOR)*10000) + (PATCH))
+
+#define COW_VERSION COW_SEMVER(COW_MAJOR, COW_MINOR, COW_PATCH)
+
+#endif
