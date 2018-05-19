@@ -3,6 +3,7 @@ add_subdirectory(header)
 add_subdirectory(linking)
 add_subdirectory(deployment)
 add_subdirectory(formatting)
+add_subdirectory(coverage)
 
 add_custom_target(tests DEPENDS
     test.unit

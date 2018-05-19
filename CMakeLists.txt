@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.9)
 
 include(cmake/Test.cmake)
 include(cmake/Deploy.cmake)
+include(cmake/Coverage.cmake)
 
 project(Cow CXX)
 
