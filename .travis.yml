@@ -10,15 +10,6 @@ env:
 
 addons:
   apt:
-    packages:
-    - tree
-    - g++-7
-    - g++-8
-    - cppcheck
-    - clang-5.0
-    - clang-tidy-5.0
-    - clang-6.0
-    - clang-tidy-6.0
     sources: &srcs
     - ubuntu-toolchain-r-test
     - llvm-toolchain-trusty-5.0
@@ -36,24 +27,62 @@ jobs:
     stage: test
     compiler: g++
     env: VERSION=7
+    addons:
+      apt:
+        packages:
+        - g++-7
+        - cppcheck
+        sources: *srcs
 
   - os: linux
     dist: trusty
     stage: test
     compiler: g++
     env: VERSION=8
+    addons:
+      apt:
+        packages:
+        - g++-8
+        - cppcheck
+        sources: *srcs
 
   - os: linux
     dist: trusty
     stage: test
     compiler: clang++
     env: VERSION=5.0
+    addons:
+      apt:
+        packages:
+        - clang++-5.0
+        - clang-tidy-5.0
+        sources: *srcs
 
   - os: linux
     dist: trusty
     stage: test
     compiler: clang++
     env: VERSION=6.0
+    addons:
+      apt:
+        packages:
+        - clang++-6.0
+        - clang-tidy-6.0
+        sources: *srcs
+
+  - os: linux
+    dist: trusty
+    stage: lint
+    compiler: g++
+    env: VERSION=8
+    script:
+      - cmake --build "${BUILD_PATH}" --target coverage
+      - bash <(curl -s https://codecov.io/bash) -f "${BUILD_PATH}/test/coverage/cov.stripped"
+    addons:
+      apt:
+        packages:
+        - g++-8
+        sources: *srcs
 
   - os: linux
     dist: trusty
@@ -84,6 +113,12 @@ jobs:
       local-dir: install/include
       on:
         tags: true
+    addons:
+      apt:
+        packages:
+        - g++-7
+        - tree
+        sources: *srcs
 
 before_install:
 - SOURCE_PATH="${TRAVIS_BUILD_DIR}"
@@ -97,8 +132,15 @@ before_install:
 - DEPS_PATH="${TRAVIS_BUILD_DIR}/deps"
 - mkdir -p "${DEPS_PATH}"
 
-- GITHUB_PATH="${TRAVIS_BUILD_DIR}/github"
-- mkdir -p "${GITHUB_PATH}"
+- BIN_PATH="${TRAVIS_BUILD_DIR}/bin"
+- mkdir -p "${BIN_PATH}"
+- export PATH="${BIN_PATH}:${PATH}"
+
+- ln -s "/usr/bin/${CC}-${VERSION}" "${BIN_PATH}/${CC}"
+- ln -s "/usr/bin/${CXX}-${VERSION}" "${BIN_PATH}/${CXX}"
+- ln -s "/usr/bin/gcov-${VERSION}" "${BIN_PATH}/gcov"
+- ln -s "/usr/bin/clang-tidy-${VERSION}" "${BIN_PATH}/clang-tidy"
+- ln -s "/usr/bin/clang-format-${VERSION}" "${BIN_PATH}/clang-format"
 
 - export CXXFLAGS="${CXXFLAGS} -fsanitize=address,undefined"
 
@@ -108,16 +150,9 @@ before_install:
     export CXXFLAGS="${CXXFLAGS} -fuse-ld=gold"
   fi
 
-- |
-  if [[ -n "${VERSION}" ]]
-  then
-    export CC="${CC}-${VERSION}"
-    export CXX="${CXX}-${VERSION}"
-  fi
-
 install:
 - |
-  if [[ ${CC} == clang* && ${CXX} == clang++* ]]
+  if [[ "${CC}" == "clang" && "${CXX}" == "clang++" ]]
   then
     git clone --depth 1 http://llvm.org/git/llvm.git "${DEPS_PATH}/llvm" || exit $?
     git clone --depth 1 http://llvm.org/git/libcxx.git "${DEPS_PATH}/llvm/projects/libcxx" || exit $?
@@ -136,18 +171,19 @@ install:
     export LDFLAGS="${LDFLAGS} -L${DEPS_PATH}/llvm/install/lib"
   fi
 
+- |
+  if [[ "${TRAVIS_BUILD_STAGE_NAME}" == "Lint" ]]
+  then
+    git clone --depth 1 https://github.com/linux-test-project/lcov.git "${DEPS_PATH}/lcov" || exit $?
+    DESTDIR="${DEPS_PATH}/lcov/" make PREFIX=install -C "${DEPS_PATH}/lcov/" install || exit $?
+    export PATH="${DEPS_PATH}/lcov/install/bin/:${PATH}"
+  fi
+
 before_script:
 - CMAKE_ARGS+=("-H${SOURCE_PATH}")
 - CMAKE_ARGS+=("-B${BUILD_PATH}")
+- CMAKE_ARGS+=("-DCMAKE_BUILD_TYPE=Debug")
 - CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}")
-
-- |
-  if [[ ${CC} == clang* && ${CXX} == clang++* ]]
-  then
-    CMAKE_ARGS+=("-DCLANG_TIDY=/usr/bin/clang-tidy-${VERSION}")
-    CMAKE_ARGS+=("-DCLANG_FORMAT=/usr/bin/clang-format-${VERSION}")
-  fi
-
 - cmake ${CMAKE_ARGS[@]}
 
 script:
