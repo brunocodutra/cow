@@ -24,8 +24,8 @@ namespace cow::detail {
     template<typename T>
     constexpr bool is_value_v = is_value<T>::value;
 
-    template<typename V>
-    using value_type_t = decltype(std::declval<V&&>().get());
+    template<typename V, typename R = decltype(std::declval<V&&>().get())>
+    using value_type_t = std::enable_if_t<is_value_v<std::decay_t<V>>, R>;
 
     template<typename T>
     class value_base;
