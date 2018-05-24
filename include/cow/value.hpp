@@ -1,10 +1,10 @@
 #ifndef COW_VALUE_HPP
 #define COW_VALUE_HPP
 
+#include "detail/proxy.hpp"
 #include "detail/traits.hpp"
 
 #include <cassert>
-#include <memory>
 #include <type_traits>
 #include <utility>
 
@@ -34,12 +34,7 @@ namespace cow::detail {
     class value_base<T const> {
         static_assert(std::is_copy_constructible_v<T>);
 
-        std::shared_ptr<T const> ptr;
-
-        template<typename... Us>
-        static auto make(Us&&... us) {
-            return std::make_shared<T const>(std::forward<Us>(us)...);
-        }
+        proxy<T> storage;
 
         template<typename U>
         friend class value_base;
@@ -51,39 +46,47 @@ namespace cow::detail {
         template<typename... Us,
             bool unary = sizeof...(Us) == 1,
             bool viable = is_convertible_v<T, Us&&...>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, Us&&...>,
             std::enable_if_t<!unary && viable, int> = 0>
-        value_base(Us&&... us) : ptr(make(std::forward<Us>(us)...)) {}
+        value_base(Us&&... us) noexcept(nothrow)
+            : storage(std::forward<Us>(us)...) {}
 
         template<typename... Us,
             bool unary = sizeof...(Us) == 1,
             bool implicit = is_convertible_v<T, Us&&...>,
             bool viable = std::is_constructible_v<T, Us&&...>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, Us&&...>,
             std::enable_if_t<!unary && !implicit && viable, int> = 0>
-        explicit value_base(Us&&... us) : ptr(make(std::forward<Us>(us)...)) {}
+        explicit value_base(Us&&... us) noexcept(nothrow)
+            : storage(std::forward<Us>(us)...) {}
 
         template<typename U,
             bool disabled = is_value_v<std::decay_t<U>>,
             bool viable = is_convertible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, U&&>,
             std::enable_if_t<!disabled && viable, int> = 0>
-        value_base(U&& u) : ptr(make(std::forward<U>(u))) {}
+        value_base(U&& u) noexcept(nothrow) : storage(std::forward<U>(u)) {}
 
         template<typename U,
             bool disabled = is_value_v<std::decay_t<U>>,
             bool implicit = is_convertible_v<T, U&&>,
             bool viable = std::is_constructible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, U&&>,
             std::enable_if_t<!disabled && !implicit && viable, int> = 0>
-        explicit value_base(U&& u) : ptr(make(std::forward<U>(u))) {}
+        explicit value_base(U&& u) noexcept(nothrow)
+            : storage(std::forward<U>(u)) {}
 
         template<typename V,
             typename U = value_type_t<V&&>,
             bool aliasable = is_convertible_v<T const*, std::decay_t<U>*>,
             bool viable = is_convertible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, V&&>,
             std::enable_if_t<viable, int> = 0>
-        value_base(V&& v) noexcept(aliasable) {
+        value_base(V&& v) noexcept(aliasable || nothrow) {
             if constexpr(aliasable) {
-                ptr = std::forward<V>(v).ptr;
+                storage = std::forward<V>(v).storage;
             } else {
-                ptr = make(std::forward<V>(v).get());
+                storage = proxy<T>(std::forward<V>(v).get());
             }
         }
 
@@ -92,17 +95,18 @@ namespace cow::detail {
             bool aliasable = is_convertible_v<T const*, std::decay_t<U>*>,
             bool implicit = is_convertible_v<T, U&&>,
             bool viable = std::is_constructible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, V&&>,
             std::enable_if_t<!implicit && viable, int> = 0>
-        explicit value_base(V&& v) noexcept(aliasable) {
+        explicit value_base(V&& v) noexcept(aliasable || nothrow) {
             if constexpr(aliasable) {
-                ptr = std::forward<V>(v).ptr;
+                storage = std::forward<V>(v).storage;
             } else {
-                ptr = make(std::forward<V>(v).get());
+                storage = proxy<T>(std::forward<V>(v).get());
             }
         }
 
         T const& get() const& noexcept {
-            return *ptr;
+            return *storage;
         }
 
         T const&& get() const&& noexcept {
@@ -110,7 +114,7 @@ namespace cow::detail {
         }
 
         auto operator-> () const noexcept {
-            return ptr;
+            return storage;
         }
 
         operator T const&() const noexcept {
@@ -137,7 +141,7 @@ namespace cow::detail {
         value_base(value_base const&) = default;
 
         value_base& operator=(value_base other) noexcept {
-            base::ptr = std::move(other).ptr;
+            base::storage = std::move(other).storage;
             return *this;
         }
 
@@ -161,12 +165,12 @@ namespace cow::detail {
         }
 
         T& get() & {
-            if(base::ptr.use_count() > 1) {
-                base::ptr = base::make(*base::ptr);
+            if(base::storage.aliased()) {
+                base::storage = proxy<T>(*base::storage);
             }
 
-            assert(base::ptr.use_count() == 1);
-            return const_cast<T&>(*base::ptr);
+            assert(!base::storage.aliased());
+            return *base::storage;
         }
 
         T&& get() && {
