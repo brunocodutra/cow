@@ -1,8 +1,8 @@
 #ifndef COW_VERSION_HPP
 #define COW_VERSION_HPP
 
-#define COW_MAJOR 0
-#define COW_MINOR 1
+#define COW_MAJOR 1
+#define COW_MINOR 0
 #define COW_PATCH 0
 
 #define COW_SEMVER(MAJOR, MINOR, PATCH) \
