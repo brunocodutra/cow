@@ -120,13 +120,6 @@ namespace cow::detail {
         operator T const&() const noexcept {
             return get();
         }
-
-        template<typename U,
-            bool aliasable = is_convertible_v<U const*, T*>,
-            std::enable_if_t<aliasable, int> = 0>
-        operator U const&() const noexcept {
-            return get();
-        }
     };
 
     template<typename T>
