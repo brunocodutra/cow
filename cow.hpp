@@ -26,6 +26,77 @@
 #define COW_UNBOX_HPP
 #ifndef COW_VALUE_HPP
 #define COW_VALUE_HPP
+#ifndef COW_DETAIL_PROXY_HPP
+#define COW_DETAIL_PROXY_HPP
+#include <memory>
+#include <type_traits>
+#include <utility>
+namespace cow::detail {
+    template<typename T, typename = void>
+    class proxy : public std::shared_ptr<T> {
+        using base = std::shared_ptr<T>;
+    public:
+        proxy(proxy&&) = default;
+        proxy(proxy const&) = default;
+        proxy(base&& b) : base(std::move(b)){};
+        proxy(base const& b) : base(b){};
+        template<typename... Us>
+        explicit proxy(Us&&... us)
+            : base(std::make_shared<T>(std::forward<Us>(us)...)) {}
+        proxy& operator=(proxy&&) = default;
+        proxy& operator=(proxy const&) = default;
+        proxy& operator=(base&& b) {
+            base::operator=(std::move(b));
+            return *this;
+        };
+        proxy& operator=(base const& b) {
+            base::operator=(b);
+            return *this;
+        };
+        using base::operator*;
+        using base::operator->;
+        bool aliased() const noexcept {
+            return base::use_count() > 1;
+        }
+    };
+    template<typename T,
+        bool trivial = std::is_trivially_copy_constructible_v<T>,
+        bool small = sizeof(T) <= sizeof(std::shared_ptr<T>)>
+    constexpr bool is_embeddable_v = trivial and small;
+    template<typename T>
+    class proxy<T, std::enable_if_t<is_embeddable_v<T>>> {
+        std::aligned_storage_t<sizeof(std::shared_ptr<T>), alignof(T)> data;
+    public:
+        proxy(proxy&&) = default;
+        proxy(proxy const&) = default;
+        template<typename... Us,
+            bool nothrow = std::is_nothrow_constructible_v<T, Us&&...>>
+        explicit proxy(Us&&... us) noexcept(nothrow) {
+            new(&data) std::decay_t<T>(std::forward<Us>(us)...);
+        }
+        ~proxy() noexcept(std::is_nothrow_destructible_v<T>) {
+            (*this)->~T();
+        }
+        proxy& operator=(proxy&&) = default;
+        proxy& operator=(proxy const&) = default;
+        T& operator*() noexcept {
+            return *reinterpret_cast<T*>(&data);
+        }
+        T const& operator*() const noexcept {
+            return *reinterpret_cast<T const*>(&data);
+        }
+        T* operator->() noexcept {
+            return std::addressof(**this);
+        }
+        T const* operator->() const noexcept {
+            return std::addressof(**this);
+        }
+        bool aliased() const noexcept {
+            return false;
+        }
+    };
+}
+#endif
 #ifndef COW_DETAIL_TRAITS_HPP
 #define COW_DETAIL_TRAITS_HPP
 #include <type_traits>
@@ -48,7 +119,6 @@ namespace cow::detail {
 }
 #endif
 #include <cassert>
-#include <memory>
 #include <type_traits>
 #include <utility>
 namespace cow::detail {
@@ -69,11 +139,7 @@ namespace cow::detail {
     template<typename T>
     class value_base<T const> {
         static_assert(std::is_copy_constructible_v<T>);
-        std::shared_ptr<T const> ptr;
-        template<typename... Us>
-        static auto make(Us&&... us) {
-            return std::make_shared<T const>(std::forward<Us>(us)...);
-        }
+        proxy<T> storage;
         template<typename U>
         friend class value_base;
     public:
@@ -82,35 +148,43 @@ namespace cow::detail {
         template<typename... Us,
             bool unary = sizeof...(Us) == 1,
             bool viable = is_convertible_v<T, Us&&...>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, Us&&...>,
             std::enable_if_t<!unary && viable, int> = 0>
-        value_base(Us&&... us) : ptr(make(std::forward<Us>(us)...)) {}
+        value_base(Us&&... us) noexcept(nothrow)
+            : storage(std::forward<Us>(us)...) {}
         template<typename... Us,
             bool unary = sizeof...(Us) == 1,
             bool implicit = is_convertible_v<T, Us&&...>,
             bool viable = std::is_constructible_v<T, Us&&...>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, Us&&...>,
             std::enable_if_t<!unary && !implicit && viable, int> = 0>
-        explicit value_base(Us&&... us) : ptr(make(std::forward<Us>(us)...)) {}
+        explicit value_base(Us&&... us) noexcept(nothrow)
+            : storage(std::forward<Us>(us)...) {}
         template<typename U,
             bool disabled = is_value_v<std::decay_t<U>>,
             bool viable = is_convertible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, U&&>,
             std::enable_if_t<!disabled && viable, int> = 0>
-        value_base(U&& u) : ptr(make(std::forward<U>(u))) {}
+        value_base(U&& u) noexcept(nothrow) : storage(std::forward<U>(u)) {}
         template<typename U,
             bool disabled = is_value_v<std::decay_t<U>>,
             bool implicit = is_convertible_v<T, U&&>,
             bool viable = std::is_constructible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, U&&>,
             std::enable_if_t<!disabled && !implicit && viable, int> = 0>
-        explicit value_base(U&& u) : ptr(make(std::forward<U>(u))) {}
+        explicit value_base(U&& u) noexcept(nothrow)
+            : storage(std::forward<U>(u)) {}
         template<typename V,
             typename U = value_type_t<V&&>,
             bool aliasable = is_convertible_v<T const*, std::decay_t<U>*>,
             bool viable = is_convertible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, V&&>,
             std::enable_if_t<viable, int> = 0>
-        value_base(V&& v) noexcept(aliasable) {
+        value_base(V&& v) noexcept(aliasable || nothrow) {
             if constexpr(aliasable) {
-                ptr = std::forward<V>(v).ptr;
+                storage = std::forward<V>(v).storage;
             } else {
-                ptr = make(std::forward<V>(v).get());
+                storage = proxy<T>(std::forward<V>(v).get());
             }
         }
         template<typename V,
@@ -118,30 +192,25 @@ namespace cow::detail {
             bool aliasable = is_convertible_v<T const*, std::decay_t<U>*>,
             bool implicit = is_convertible_v<T, U&&>,
             bool viable = std::is_constructible_v<T, U&&>,
+            bool nothrow = std::is_nothrow_constructible_v<proxy<T>, V&&>,
             std::enable_if_t<!implicit && viable, int> = 0>
-        explicit value_base(V&& v) noexcept(aliasable) {
+        explicit value_base(V&& v) noexcept(aliasable || nothrow) {
             if constexpr(aliasable) {
-                ptr = std::forward<V>(v).ptr;
+                storage = std::forward<V>(v).storage;
             } else {
-                ptr = make(std::forward<V>(v).get());
+                storage = proxy<T>(std::forward<V>(v).get());
             }
         }
         T const& get() const& noexcept {
-            return *ptr;
+            return *storage;
         }
         T const&& get() const&& noexcept {
             return std::move(get());
         }
         auto operator-> () const noexcept {
-            return ptr;
+            return storage;
         }
         operator T const&() const noexcept {
-            return get();
-        }
-        template<typename U,
-            bool aliasable = is_convertible_v<U const*, T*>,
-            std::enable_if_t<aliasable, int> = 0>
-        operator U const&() const noexcept {
             return get();
         }
     };
@@ -154,7 +223,7 @@ namespace cow::detail {
         value_base(value_base&&) = default;
         value_base(value_base const&) = default;
         value_base& operator=(value_base other) noexcept {
-            base::ptr = std::move(other).ptr;
+            base::storage = std::move(other).storage;
             return *this;
         }
         template<typename U,
@@ -175,11 +244,11 @@ namespace cow::detail {
             return *this = value_base(std::forward<V>(v));
         }
         T& get() & {
-            if(base::ptr.use_count() > 1) {
-                base::ptr = base::make(*base::ptr);
+            if(base::storage.aliased()) {
+                base::storage = proxy<T>(*base::storage);
             }
-            assert(base::ptr.use_count() == 1);
-            return const_cast<T&>(*base::ptr);
+            assert(!base::storage.aliased());
+            return *base::storage;
         }
         T&& get() && {
             return std::move(get());
@@ -260,8 +329,8 @@ namespace cow {
 #endif
 #ifndef COW_VERSION_HPP
 #define COW_VERSION_HPP
-#define COW_MAJOR 0
-#define COW_MINOR 1
+#define COW_MAJOR 1
+#define COW_MINOR 0
 #define COW_PATCH 0
 #define COW_SEMVER(MAJOR, MINOR, PATCH) (((MAJOR)*1000000) + ((MINOR)*10000) + (PATCH))
 #define COW_VERSION COW_SEMVER(COW_MAJOR, COW_MINOR, COW_PATCH)
