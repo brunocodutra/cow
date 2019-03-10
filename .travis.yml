@@ -26,12 +26,28 @@ addons:
     - llvm-toolchain-trusty-6.0
 
 stages:
-- test
 - lint
+- test
 - deploy
 
 jobs:
   include:
+  - os: linux
+    dist: trusty
+    stage: lint
+    compiler: g++
+    env: VERSION=8
+    script:
+      - cmake --build "${BUILD_PATH}" --target coverage
+      - bash <(curl -s https://codecov.io/bash) -f "${BUILD_PATH}/test/coverage/cov.stripped"
+
+  - os: linux
+    dist: trusty
+    stage: lint
+    compiler: clang++
+    env: VERSION=6.0
+    script: (cd "${BUILD_PATH}" && ctest --output-on-failure -R ^test.format)
+
   - os: linux
     dist: trusty
     stage: test
@@ -55,22 +71,6 @@ jobs:
     stage: test
     compiler: clang++
     env: VERSION=6.0
-
-  - os: linux
-    dist: trusty
-    stage: lint
-    compiler: g++
-    env: VERSION=8
-    script:
-      - cmake --build "${BUILD_PATH}" --target coverage
-      - bash <(curl -s https://codecov.io/bash) -f "${BUILD_PATH}/test/coverage/cov.stripped"
-
-  - os: linux
-    dist: trusty
-    stage: lint
-    compiler: clang++
-    env: VERSION=6.0
-    script: (cd "${BUILD_PATH}" && ctest --output-on-failure -R ^test.format)
 
   - os: linux
     dist: trusty
