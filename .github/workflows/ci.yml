@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+  release:
+    types: [published]
+  schedule:
+  - cron:  '0 6 * * SAT'
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    env:
+      CXX: 'clang++'
+    steps:
+    - uses: actions/checkout@v1
+    - name: install
+      run: |
+        sudo sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc) main"
+        sudo apt-get update
+        sudo apt-get install -y clang clang-format
+    - name: configure
+      run: cmake -H. -Bbuild/
+    - name: lint
+      run: cd build && ctest --output-on-failure -R ^test.format
+
+  gcc:
+    needs: [format]
+    runs-on: ubuntu-latest
+    env:
+      CXX: 'g++'
+      CXXFLAGS: '-fsanitize=address,undefined -fuse-ld=gold'
+    steps:
+    - uses: actions/checkout@v1
+    - name: install
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y g++ cppcheck
+    - name: configure
+      run: cmake -H. -Bbuild/
+    - name: test
+      run: cd build && ctest --output-on-failure -E ^test.format
+
+  clang:
+    needs: [format]
+    runs-on: ubuntu-latest
+    env:
+      CXX: 'clang++'
+      CXXFLAGS: '-fsanitize=address,undefined'
+    steps:
+    - uses: actions/checkout@v1
+    - name: install
+      run: |
+        sudo sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc) main"
+        sudo apt-get update
+        sudo apt-get install -y clang
+    - name: configure
+      run: cmake -H. -Bbuild/
+    - name: test
+      run: cd build && ctest --output-on-failure -E ^test.format
+
+  xcode:
+    needs: [format]
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: configure
+      run: cmake -H. -Bbuild/
+    - name: test
+      run: cd build && ctest --output-on-failure -E ^test.format
+
+  msvc:
+    needs: [format]
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: configure
+      run: mkdir build; cd build; cmake ..
+    - name: test
+      run: cd build; ctest -C Release --output-on-failure -E ^test.format
+
+  coverage:
+    needs: [gcc, clang, xcode, msvc]
+    runs-on: ubuntu-latest
+    env:
+      CXX: 'g++'
+    steps:
+    - uses: actions/checkout@v1
+    - name: install
+      run: |
+        sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+        sudo apt-get update
+        sudo apt-get install -y g++
+        git clone --depth 1 https://github.com/linux-test-project/lcov.git "/tmp/lcov"
+        DESTDIR="/tmp/lcov/" make PREFIX=install -C "/tmp/lcov/" install
+    - name: configure
+      run: cmake -H. -Bbuild/ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PROGRAM_PATH=/tmp/lcov/install/bin/
+    - name: sample
+      run: cmake --build build/ --target coverage
+    - name: upload
+      run: bash <(curl -s https://codecov.io/bash) -C $GITHUB_SHA -B ${GITHUB_REF#refs/heads/} -f "build/test/coverage/cov.stripped" -Z
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  standalone:
+    needs: [coverage]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: install
+      run: sudo apt-get install -y tree
+    - name: configure
+      run: cmake -H. -Bbuild/ -DCMAKE_INSTALL_PREFIX=${PWD}/install/
+    - name: deploy
+      run: cmake --build build/ --target install && tree ${PWD}/install/
+    - name: release
+      if: github.event_name == 'release'
+      uses: JamesIves/github-pages-deploy-action@releases/v3
+      with:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BRANCH: standalone
+        FOLDER: install/include
