@@ -41,6 +41,7 @@ public:
         return *this;
     };
 
+    using base::get;
     using base::operator*;
     using base::operator->;
 
@@ -53,7 +54,7 @@ public:
 template <typename T,
     bool trivial = std::is_trivially_copy_constructible_v<T>,
     bool small = sizeof(T) <= sizeof(std::shared_ptr<T>)>
-constexpr bool is_embeddable_v = trivial and small;
+constexpr bool is_embeddable_v = trivial&& small;
 
 template <typename T>
 class proxy<T, std::enable_if_t<is_embeddable_v<T>>> {
@@ -72,30 +73,40 @@ public:
 
     ~proxy() noexcept(std::is_nothrow_destructible_v<T>)
     {
-        (*this)->~T();
+        get()->~T();
     }
 
     proxy& operator=(proxy&&) = default;
     proxy& operator=(proxy const&) = default;
 
+    T* get() noexcept
+    {
+        return reinterpret_cast<T*>(&data);
+    }
+
+    T const* get() const noexcept
+    {
+        return reinterpret_cast<T const*>(&data);
+    }
+
     T& operator*() noexcept
     {
-        return *reinterpret_cast<T*>(&data);
+        return *get();
     }
 
     T const& operator*() const noexcept
     {
-        return *reinterpret_cast<T const*>(&data);
+        return *get();
     }
 
     T* operator->() noexcept
     {
-        return std::addressof(**this);
+        return get();
     }
 
     T const* operator->() const noexcept
     {
-        return std::addressof(**this);
+        return get();
     }
 
     bool aliased() const noexcept
