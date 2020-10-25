@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CXX: 'clang++'
-      CXXFLAGS: '-fsanitize=address,undefined'
+      CXXFLAGS: '-fsanitize=address,undefined -stdlib=libc++'
     steps:
     - uses: actions/checkout@v1
     - name: install
@@ -61,7 +61,7 @@ jobs:
         sudo wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key|sudo apt-key add -
         sudo sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc) main"
         sudo apt-get update
-        sudo apt-get install -y clang clang-tidy
+        sudo apt-get install -y clang clang-tidy libc++-dev libc++abi-dev
     - name: configure
       run: cmake -H. -Bbuild/ -DCLANG_TIDY=/usr/bin/clang-tidy
     - name: test
