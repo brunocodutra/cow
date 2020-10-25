@@ -16,16 +16,16 @@ jobs:
   format:
     runs-on: ubuntu-latest
     env:
-      CXX: 'clang++'
+      CXX: 'clang++-10'
     steps:
     - uses: actions/checkout@v1
     - name: install
       run: |
-        sudo sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc) main"
+        sudo add-apt-repository "deb http://apt.llvm.org/$(lsb_release -sc)/ llvm-toolchain-$(lsb_release -sc)-10 main"
         sudo apt-get update
-        sudo apt-get install -y clang clang-format
+        sudo apt-get install -y clang-10 clang-format-10
     - name: configure
-      run: cmake -H. -Bbuild/
+      run: cmake -H. -Bbuild/ -DCLANG_FORMAT=/usr/bin/clang-format-10
     - name: lint
       run: cd build && ctest --output-on-failure -R ^test.format
 
